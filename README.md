@@ -4,7 +4,7 @@ React, Tailwind, and Express attendance app with Google faculty sign-in, student
 
 ## Run locally
 
-Requirements: Node.js 22+.
+Requirements: Node.js 24.12+.
 
 ```sh
 npm install
