@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { apiRequest } from './api.js'
+import { firebaseAuth, firebaseConfigured, signInWithGoogle, signOutFromGoogle } from './firebase.js'
 import {
   ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpenCheck,
   CalendarDays, Check, CheckCheck, CircleAlert, Clock3, Download,
@@ -186,14 +187,14 @@ function SectionHeading({ title, detail, action }) {
   return <div className="mb-5 flex items-end justify-between gap-3"><div><h2 className="text-base font-semibold text-slate-900">{title}</h2>{detail && <p className="mt-1 text-xs text-slate-500">{detail}</p>}</div>{action}</div>
 }
 
-function WeeklyChart() {
+function WeeklyChart({ attendance }) {
   return (
     <div className="flex h-52 items-end gap-3 sm:gap-5">
-      {weeklyAttendance.map(({ day, value }, index) => (
+      {attendance.map(({ day, value }, index) => (
         <div key={day} className="flex h-full flex-1 flex-col items-center justify-end gap-2">
           <span className="text-[11px] font-medium tabular-nums text-slate-500">{value}%</span>
           <div className="flex h-[72%] w-full max-w-12 items-end overflow-hidden rounded-t-lg bg-slate-100">
-            <div className={`w-full rounded-t-lg transition-all duration-700 ${index === weeklyAttendance.length - 1 ? 'bg-indigo-600' : 'bg-indigo-200'}`} style={{ height: `${value}%` }} />
+            <div className={`w-full rounded-t-lg transition-all duration-700 ${index === attendance.length - 1 ? 'bg-indigo-600' : 'bg-indigo-200'}`} style={{ height: `${value}%` }} />
           </div>
           <span className="text-[11px] text-slate-400">{day}</span>
         </div>
@@ -250,7 +251,7 @@ function EmptyState({ icon: Icon = Search, title, detail }) {
   return <div className="grid justify-items-center px-6 py-14 text-center"><span className="mb-3 grid size-11 place-items-center rounded-xl bg-slate-100 text-slate-400"><Icon size={20} /></span><p className="text-sm font-medium text-slate-700">{title}</p><p className="mt-1 text-xs text-slate-400">{detail}</p></div>
 }
 
-function App() {
+function FacultyDashboard({ user, firebaseMode, onLogout }) {
   const [students, setStudents] = useState(readStudents)
   const [backendReady, setBackendReady] = useState(false)
   const [session, setSession] = useState(null)
@@ -265,7 +266,11 @@ function App() {
   const [departmentFilter, setDepartmentFilter] = useState('All departments')
   const [seconds, setSeconds] = useState(30)
   const [recentCheckins, setRecentCheckins] = useState([])
+  const [weeklyStats, setWeeklyStats] = useState(weeklyAttendance)
   const [toast, setToast] = useState('')
+  const [staffFormOpen, setStaffFormOpen] = useState(false)
+  const [staffDraft, setStaffDraft] = useState({ name: '', email: '', password: '' })
+  const [staffError, setStaffError] = useState('')
 
   useEffect(() => {
     let active = true
@@ -279,6 +284,7 @@ function App() {
         setGeofence(data.geofence)
         setSession(data.session)
         setRecentCheckins(data.checkins || [])
+        if (data.weekly) setWeeklyStats(data.weekly)
         setSeconds(data.session?.refreshInSeconds || 30)
         setBackendReady(true)
       } catch {
@@ -300,11 +306,12 @@ function App() {
         setGeofence(data.geofence)
         setSession(data.session)
         setRecentCheckins(data.checkins || [])
+        if (data.weekly) setWeeklyStats(data.weekly)
       } catch { /* Keep the current screen visible during a brief network interruption. */ }
     }
-    const timer = window.setInterval(sync, 4000)
+    const timer = window.setInterval(sync, firebaseMode ? 15000 : 4000)
     return () => window.clearInterval(timer)
-  }, [backendReady])
+  }, [backendReady, firebaseMode])
 
   useEffect(() => {
     if (activeTab !== 'attendance' || attendanceMode !== 'qr' || !session?.active) return undefined
@@ -387,6 +394,18 @@ function App() {
     setStudentDraft({ name: '', roll: '', department: departments[0] })
     setStudentFormError('')
     setToast(`${name} added to the roster.`)
+  }
+
+  async function addFaculty(event) {
+    event.preventDefault()
+    setStaffError('')
+    try {
+      const staff = firebaseMode ? { name: staffDraft.name, email: staffDraft.email } : staffDraft
+      await apiRequest('/api/users', { method: 'POST', body: JSON.stringify(staff) })
+      setStaffFormOpen(false)
+      setStaffDraft({ name: '', email: '', password: '' })
+      setToast('Faculty account created. Share its sign-in details securely.')
+    } catch (error) { setStaffError(error.message) }
   }
 
   function exportStudentsCsv() {
@@ -531,12 +550,12 @@ function App() {
         </div>
         <div className="mt-auto p-4">
           <div className="rounded-2xl border border-white/10 bg-white/[.04] p-4"><div className="flex items-center gap-2 text-xs font-medium text-slate-200"><ShieldCheck size={16} className="text-indigo-300" /> Attendance overview</div><p className="mt-2 text-[11px] leading-5 text-slate-500">Your class average is <span className="font-semibold text-slate-300">{average}%</span>. Keep an eye on students below 75%.</p><button type="button" onClick={() => changeTab('reports')} className="mt-3 inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-300 hover:text-indigo-200">View reports <ArrowRight size={13} /></button></div>
-          <div className="mt-5 flex items-center gap-3 px-1"><div className="grid size-9 place-items-center rounded-full bg-gradient-to-br from-indigo-400 to-violet-600 text-xs font-bold text-white">FA</div><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold text-white">Faculty Admin</p><p className="mt-0.5 text-[10px] text-slate-500">CSE · Academic year 2025–26</p></div><MoreHorizontal size={18} className="text-slate-500" /></div>
+          <div className="mt-5 flex items-center gap-3 px-1"><div className="grid size-9 place-items-center rounded-full bg-gradient-to-br from-indigo-400 to-violet-600 text-xs font-bold text-white">{initials(user.name)}</div><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold text-white">{user.name}</p><p className="mt-0.5 truncate text-[10px] text-slate-500">{user.email} · {user.role}</p></div><button type="button" onClick={onLogout} className="text-[10px] font-semibold text-slate-400 hover:text-white">Sign out</button></div>
         </div>
       </aside>
 
       <div className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-4 backdrop-blur lg:hidden">
-        <div className="flex h-14 items-center justify-between"><div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-lg bg-indigo-600 text-white"><GraduationCap size={18} /></span><span className="text-sm font-semibold text-slate-900">Campus</span></div><span className="text-xs text-slate-500">Faculty Admin</span></div>
+        <div className="flex h-14 items-center justify-between"><div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-lg bg-indigo-600 text-white"><GraduationCap size={18} /></span><span className="text-sm font-semibold text-slate-900">Campus</span></div><button type="button" onClick={onLogout} className="text-xs text-slate-500">Sign out · {user.name}</button></div>
         <nav className="scrollbar-subtle flex gap-1 overflow-x-auto pb-2" aria-label="Main navigation">{navItems.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => changeTab(id)} className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${activeTab === id ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500'}`}><Icon size={15} />{label}</button>)}</nav>
       </div>
 
@@ -544,7 +563,7 @@ function App() {
         <div className="mx-auto max-w-[1440px] px-4 pb-12 pt-6 sm:px-7 lg:px-10 lg:pt-9">
           <header className="mb-7 flex flex-wrap items-center justify-between gap-4">
             <div><div className="mb-1 flex items-center gap-2 text-xs text-slate-400"><span>Workspace</span><span>/</span><span className="text-slate-600">{pageInfo.label}</span></div><h1 className="text-2xl font-semibold tracking-tight text-slate-950 sm:text-[27px]">{activeTab === 'overview' ? 'Good morning, Faculty' : pageInfo.label}</h1><p className="mt-1 text-sm text-slate-500">{activeTab === 'overview' ? 'Here’s your attendance snapshot for today.' : activeTab === 'attendance' ? 'Record and review today’s class attendance.' : activeTab === 'students' ? 'Search attendance records and student insights.' : 'Identify students who may need additional support.'}</p></div>
-            <div className="flex items-center gap-3"><div className="hidden items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500 sm:flex"><CalendarDays size={15} className="text-slate-400" />{todayLabel}</div><button type="button" className="relative grid size-10 place-items-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50" aria-label="Notifications"><Bell size={17} /><span className="absolute right-2 top-2 size-1.5 rounded-full bg-indigo-500 ring-2 ring-white" /></button><div className="hidden size-10 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700 sm:flex">FA</div></div>
+            <div className="flex items-center gap-3"><div className="hidden items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500 sm:flex"><CalendarDays size={15} className="text-slate-400" />{todayLabel}</div>{user.role === 'admin' && <button type="button" onClick={() => { setStaffError(''); setStaffFormOpen(true) }} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">Add faculty</button>}<div className="hidden size-10 items-center justify-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700 sm:flex">{initials(user.name)}</div></div>
           </header>
 
           {activeTab === 'overview' && <section className="animate-rise space-y-5">
@@ -556,7 +575,7 @@ function App() {
             </div>
 
             <div className="grid gap-5 xl:grid-cols-[1.55fr_1fr]">
-              <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-200/30 sm:p-6"><SectionHeading title="Weekly attendance trend" detail="Class attendance rate across the last six days" action={<button type="button" onClick={() => changeTab('students')} className="hidden items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 sm:inline-flex">View analytics <ArrowRight size={14} /></button>} /><div className="mb-4 flex items-baseline gap-2"><span className="text-3xl font-semibold tracking-tight text-slate-900">{average}%</span><span className="text-xs font-medium text-emerald-700">class average</span></div><WeeklyChart /><div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-4 text-[11px] text-slate-400"><span className="size-2 rounded-full bg-indigo-500" />Today’s attendance <span className="ml-auto">Updated just now</span></div></article>
+              <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-200/30 sm:p-6"><SectionHeading title="Weekly attendance trend" detail="Present or late as a share of the roster each day" action={<button type="button" onClick={() => changeTab('students')} className="hidden items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 sm:inline-flex">View analytics <ArrowRight size={14} /></button>} /><div className="mb-4 flex items-baseline gap-2"><span className="text-3xl font-semibold tracking-tight text-slate-900">{average}%</span><span className="text-xs font-medium text-emerald-700">overall average</span></div><WeeklyChart attendance={weeklyStats} /><div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-4 text-[11px] text-slate-400"><span className="size-2 rounded-full bg-indigo-500" />Attendance records <span className="ml-auto">Updated automatically</span></div></article>
               <article className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm shadow-slate-200/30 sm:p-6"><SectionHeading title="Department average" detail="Attendance rate by department" /><DepartmentBreakdown students={students} /></article>
             </div>
 
@@ -591,11 +610,51 @@ function App() {
         </div>
       </main>
 
-      {studentFormOpen && <div className="fixed inset-0 z-40 grid place-items-center bg-slate-950/45 p-4 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) setStudentFormOpen(false) }}><section role="dialog" aria-modal="true" aria-labelledby="add-student-title" className="animate-rise w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl sm:p-6"><div className="mb-5 flex items-start justify-between"><div><h2 id="add-student-title" className="text-lg font-semibold text-slate-900">Add a student</h2><p className="mt-1 text-xs text-slate-500">Add a student to this class roster.</p></div><button type="button" onClick={() => setStudentFormOpen(false)} aria-label="Close form" className="grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X size={17} /></button></div><form onSubmit={addStudent} className="space-y-4"><label className="block"><span className="mb-1.5 block text-xs font-medium text-slate-700">Student name</span><input autoFocus required value={studentDraft.name} onChange={(event) => setStudentDraft((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Samira Patel" className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /></label><label className="block"><span className="mb-1.5 block text-xs font-medium text-slate-700">Roll number</span><input required value={studentDraft.roll} onChange={(event) => setStudentDraft((current) => ({ ...current, roll: event.target.value }))} placeholder="e.g. 22CS125" className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm uppercase outline-none placeholder:normal-case placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /></label><label className="block"><span className="mb-1.5 block text-xs font-medium text-slate-700">Department</span><select value={studentDraft.department} onChange={(event) => setStudentDraft((current) => ({ ...current, department: event.target.value }))} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100">{departmentOptions.map((department) => <option key={department}>{department}</option>)}</select></label><p className="text-[11px] text-slate-400">New students start at 100% overall attendance and are unmarked for today.</p>{studentFormError && <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{studentFormError}</p>}<div className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={() => setStudentFormOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">Cancel</button><button type="submit" className="rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700">Add student</button></div></form></section></div>}
+      {studentFormOpen && <div className="fixed inset-0 z-40 grid place-items-center bg-slate-950/45 p-4 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) setStudentFormOpen(false) }}><section role="dialog" aria-modal="true" aria-labelledby="add-student-title" className="animate-rise w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl sm:p-6"><div className="mb-5 flex items-start justify-between"><div><h2 id="add-student-title" className="text-lg font-semibold text-slate-900">Add a student</h2><p className="mt-1 text-xs text-slate-500">Add a student to this class roster.</p></div><button type="button" onClick={() => setStudentFormOpen(false)} aria-label="Close form" className="grid size-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"><X size={17} /></button></div><form onSubmit={addStudent} className="space-y-4"><label className="block"><span className="mb-1.5 block text-xs font-medium text-slate-700">Student name</span><input autoFocus required value={studentDraft.name} onChange={(event) => setStudentDraft((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Samira Patel" className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /></label><label className="block"><span className="mb-1.5 block text-xs font-medium text-slate-700">Roll number</span><input required value={studentDraft.roll} onChange={(event) => setStudentDraft((current) => ({ ...current, roll: event.target.value }))} placeholder="e.g. 22CS125" className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm uppercase outline-none placeholder:normal-case focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" /></label><label className="block"><span className="mb-1.5 block text-xs font-medium text-slate-700">Department</span><select value={studentDraft.department} onChange={(event) => setStudentDraft((current) => ({ ...current, department: event.target.value }))} className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100">{departmentOptions.map((department) => <option key={department}>{department}</option>)}</select></label><p className="text-[11px] text-slate-400">New students start at 100% overall attendance and are unmarked for today.</p>{studentFormError && <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{studentFormError}</p>}<div className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={() => setStudentFormOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">Cancel</button><button type="submit" className="rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-indigo-700">Add student</button></div></form></section></div>}
+
+      {staffFormOpen && <div className="fixed inset-0 z-40 grid place-items-center bg-slate-950/45 p-4 backdrop-blur-[2px]" onMouseDown={(event) => { if (event.target === event.currentTarget) setStaffFormOpen(false) }}><section role="dialog" aria-modal="true" aria-labelledby="add-faculty-title" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"><div className="mb-5"><h2 id="add-faculty-title" className="text-lg font-semibold text-slate-900">{firebaseMode ? 'Approve a faculty Google account' : 'Create a faculty account'}</h2><p className="mt-1 text-xs leading-5 text-slate-500">{firebaseMode ? 'Add their email. They will sign in with that Google account.' : 'Give each staff member their own sign-in and ask them to change the temporary password.'}</p></div><form onSubmit={addFaculty} className="space-y-4"><label className="block text-xs font-medium text-slate-700">Faculty name<input required value={staffDraft.name} onChange={(e) => setStaffDraft({ ...staffDraft, name: e.target.value })} className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 px-3 outline-none focus:border-indigo-400" /></label><label className="block text-xs font-medium text-slate-700">Email<input required type="email" value={staffDraft.email} onChange={(e) => setStaffDraft({ ...staffDraft, email: e.target.value })} className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 px-3 outline-none focus:border-indigo-400" /></label>{!firebaseMode && <label className="block text-xs font-medium text-slate-700">Temporary password<input required minLength={12} type="password" value={staffDraft.password} onChange={(e) => setStaffDraft({ ...staffDraft, password: e.target.value })} className="mt-1.5 h-10 w-full rounded-xl border border-slate-200 px-3 outline-none focus:border-indigo-400" /><span className="mt-1 block text-[10px] text-slate-400">At least 12 characters. Share it out of band.</span></label>}{staffError && <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">{staffError}</p>}<div className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={() => setStaffFormOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600">Cancel</button><button className="rounded-xl bg-indigo-600 px-4 py-2 text-xs font-semibold text-white">{firebaseMode ? 'Approve faculty' : 'Create account'}</button></div></form></section></div>}
 
       {toast && <div role="status" className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-xs font-medium text-white shadow-xl"><Check size={15} className="text-emerald-400" />{toast}<button type="button" onClick={() => setToast('')} className="ml-2 text-slate-400 hover:text-white" aria-label="Dismiss"><X size={14} /></button></div>}
     </div>
   )
 }
 
-export default App
+export default function App() {
+  const [auth, setAuth] = useState({ loading: true, setupRequired: false, user: null })
+  useEffect(() => {
+    let active = true
+    const identity = firebaseAuth?.authStateReady().then(() => apiRequest('/api/auth/me')) || apiRequest('/api/auth/me')
+    Promise.all([apiRequest('/api/auth/status'), identity])
+      .then(([status, identity]) => { if (active) setAuth({ loading: false, setupRequired: status.setupRequired, firebaseMode: status.firebaseEnabled, user: identity.user }) })
+      .catch(() => { if (active) setAuth({ loading: false, setupRequired: false, user: null, serverError: true }) })
+    return () => { active = false }
+  }, [])
+  if (auth.loading) return <div className="grid min-h-screen place-items-center bg-slate-50 text-sm text-slate-500">Connecting to the attendance server…</div>
+  if (!auth.user) return <AuthScreen setupRequired={auth.setupRequired} firebaseMode={auth.firebaseMode && firebaseConfigured} serverError={auth.serverError} onAuthenticated={(user) => setAuth({ loading: false, setupRequired: false, firebaseMode: auth.firebaseMode, user })} />
+  return <FacultyDashboard user={auth.user} firebaseMode={auth.firebaseMode} onLogout={async () => { if (auth.firebaseMode) await signOutFromGoogle(); else await apiRequest('/api/auth/logout', { method: 'POST' }); setAuth({ loading: false, setupRequired: false, firebaseMode: auth.firebaseMode, user: null }) }} />
+}
+
+function AuthScreen({ setupRequired, firebaseMode, serverError, onAuthenticated }) {
+  const [error, setError] = useState(serverError ? 'Could not connect to the API. Run npm run dev and refresh this page.' : '')
+  const [busy, setBusy] = useState(false)
+  const [values, setValues] = useState({ token: '', name: '', email: '', password: '' })
+  async function continueWithGoogle() {
+    setBusy(true); setError('')
+    try {
+      await signInWithGoogle()
+      const identity = await apiRequest('/api/auth/me')
+      if (!identity.user) throw new Error('This Google account is not approved for attendance staff. Ask the administrator to add your email.')
+      onAuthenticated(identity.user)
+    } catch (reason) { await signOutFromGoogle().catch(() => {}); setError(reason.message || 'Google sign-in failed.') } finally { setBusy(false) }
+  }
+  if (firebaseMode) return <main className="grid min-h-screen place-items-center bg-slate-100 px-4 py-10"><section className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-7 shadow-xl shadow-slate-300/40 sm:p-9"><div className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl bg-indigo-600 text-white"><GraduationCap size={22} /></span><div><p className="font-semibold text-slate-900">Campus</p><p className="text-[10px] uppercase tracking-[.17em] text-slate-400">Attendance workspace</p></div></div><h1 className="mt-8 text-2xl font-semibold tracking-tight text-slate-950">Faculty sign in</h1><p className="mt-2 text-sm leading-6 text-slate-500">Sign in with an approved Google account to manage attendance and students.</p>{error && <p role="alert" className="mt-5 rounded-xl bg-rose-50 p-3 text-xs leading-5 text-rose-700">{error}</p>}<button type="button" onClick={continueWithGoogle} disabled={busy} className="mt-6 h-12 w-full rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50">{busy ? 'Signing in…' : 'Continue with Google'}</button></section></main>
+  async function submit(event) {
+    event.preventDefault()
+    setBusy(true); setError('')
+    try {
+      const user = await apiRequest(setupRequired ? '/api/auth/setup' : '/api/auth/login', { method: 'POST', body: JSON.stringify(values) })
+      onAuthenticated(user.user)
+    } catch (reason) { setError(reason.message) } finally { setBusy(false) }
+  }
+  return <main className="grid min-h-screen place-items-center bg-slate-100 px-4 py-10"><section className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-7 shadow-xl shadow-slate-300/40 sm:p-9"><div className="flex items-center gap-3"><span className="grid size-11 place-items-center rounded-xl bg-indigo-600 text-white"><GraduationCap size={22} /></span><div><p className="font-semibold text-slate-900">Campus</p><p className="text-[10px] uppercase tracking-[.17em] text-slate-400">Attendance workspace</p></div></div><h1 className="mt-8 text-2xl font-semibold tracking-tight text-slate-950">{setupRequired ? 'Set up your administrator' : 'Faculty sign in'}</h1><p className="mt-2 text-sm leading-6 text-slate-500">{setupRequired ? 'Create the first protected account for this attendance workspace.' : 'Sign in to manage attendance, students, and reports.'}</p><form onSubmit={submit} className="mt-6 space-y-4">{setupRequired && <><label className="block text-xs font-medium text-slate-700">One-time setup token<input required autoComplete="off" value={values.token} onChange={(e) => setValues({ ...values, token: e.target.value })} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 outline-none focus:border-indigo-400" /></label><label className="block text-xs font-medium text-slate-700">Your name<input required value={values.name} onChange={(e) => setValues({ ...values, name: e.target.value })} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 outline-none focus:border-indigo-400" /></label></>}<label className="block text-xs font-medium text-slate-700">Email<input required type="email" autoComplete="username" value={values.email} onChange={(e) => setValues({ ...values, email: e.target.value })} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 outline-none focus:border-indigo-400" /></label><label className="block text-xs font-medium text-slate-700">Password<input required type="password" autoComplete={setupRequired ? 'new-password' : 'current-password'} minLength={setupRequired ? 12 : undefined} value={values.password} onChange={(e) => setValues({ ...values, password: e.target.value })} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 px-3 outline-none focus:border-indigo-400" />{setupRequired && <span className="mt-1 block text-[10px] text-slate-400">Use at least 12 characters.</span>}</label>{error && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-xs leading-5 text-rose-700">{error}</p>}<button disabled={busy} className="h-11 w-full rounded-xl bg-indigo-600 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50">{busy ? 'Please wait…' : setupRequired ? 'Create administrator' : 'Sign in'}</button></form><p className="mt-5 text-center text-[10px] leading-5 text-slate-400">Use HTTPS when accessing this application from outside your development computer.</p></section></main>
+}
