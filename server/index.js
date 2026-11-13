@@ -8,7 +8,10 @@ const port = Number(process.env.PORT || 4173)
 const app = express()
 const sevenDays = 7 * 24 * 60 * 60 * 1000
 const loginAttempts = new Map()
-if (firebaseEnabled) await cloud.migrateLocalData()
+if (firebaseEnabled && process.env.FIREBASE_MIGRATE_LOCAL_DATA === 'true') {
+  try { await cloud.migrateLocalData() }
+  catch (error) { console.error('Optional Firebase data migration failed:', error.message) }
+}
 app.disable('x-powered-by')
 app.use((request, response, next) => {
   response.setHeader('X-Content-Type-Options', 'nosniff')

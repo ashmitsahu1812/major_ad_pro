@@ -61,6 +61,7 @@ Add these variables in **Vercel → Project → Settings → Environment Variabl
 - `FIREBASE_PROJECT_ID`
 - `FIREBASE_ADMIN_EMAILS`
 - `FIREBASE_SERVICE_ACCOUNT_JSON` — paste the service-account JSON as a server-only secret; never add it to Git or a `VITE_` variable.
+- `FIREBASE_MIGRATE_LOCAL_DATA=true` — only enable temporarily if you still need to import a local SQLite roster into Firestore; leave unset after the import.
 - `APP_TIME_ZONE=Asia/Kolkata`
 
 After the first deployment, add the assigned `*.vercel.app` hostname to **Firebase Authentication → Settings → Authorized domains** and redeploy. The server credential is stored in Vercel's environment settings, roster and attendance data stay in Firestore, and Vercel's filesystem is temporary.

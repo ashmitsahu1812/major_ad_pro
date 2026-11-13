@@ -309,7 +309,7 @@ function FacultyDashboard({ user, firebaseMode, onLogout }) {
         if (data.weekly) setWeeklyStats(data.weekly)
       } catch { /* Keep the current screen visible during a brief network interruption. */ }
     }
-    const timer = window.setInterval(sync, firebaseMode ? 15000 : 4000)
+    const timer = window.setInterval(sync, firebaseMode ? 60000 : 4000)
     return () => window.clearInterval(timer)
   }, [backendReady, firebaseMode])
 
