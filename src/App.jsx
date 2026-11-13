@@ -10,24 +10,6 @@ import {
 } from 'lucide-react'
 
 const departments = ['CSE', 'ECE', 'Mechanical', 'Civil', 'IT']
-const names = [
-  'Aarav Sharma', 'Ananya Reddy', 'Rohan Verma', 'Priya Nair', 'Karthik Iyer',
-  'Sneha Patel', 'Vikram Singh', 'Meera Joshi', 'Arjun Rao', 'Divya Menon',
-  'Rahul Gupta', 'Isha Kapoor', 'Sai Teja', 'Neha Desai', 'Aditya Kumar',
-  'Pooja Hegde', 'Manoj Pillai', 'Kavya Shetty', 'Harsh Vardhan',
-  'Lakshmi Prasad', 'Nikhil Bose', 'Swathi Reddy', 'Tarun Mehta', 'Zoya Khan',
-]
-const percentages = [96, 91, 68, 88, 72, 94, 59, 83, 90, 77, 62, 97, 81, 70, 86, 93, 55, 89, 74, 85, 66, 92, 79, 64]
-const todaysAttendance = ['present', 'present', 'absent', 'present', 'late', 'present', 'absent', 'present', 'present', 'late', 'absent', 'present', 'present', 'absent', 'present', 'present', 'absent', 'present', 'unmarked', 'present', 'absent', 'present', 'unmarked', 'absent']
-const sampleStudents = names.map((name, id) => ({
-  id,
-  name,
-  roll: `22${['CS', 'EC', 'ME', 'CE', 'IT'][id % 5]}${101 + id}`,
-  department: departments[id % departments.length],
-  percentage: percentages[id],
-  today: todaysAttendance[id],
-  notified: false,
-}))
 
 const navItems = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -35,20 +17,6 @@ const navItems = [
   { id: 'students', label: 'Students', icon: Users },
   { id: 'reports', label: 'Reports', icon: BookOpenCheck },
 ]
-
-const weeklyAttendance = [
-  { day: 'Mon', value: 89 }, { day: 'Tue', value: 92 },
-  { day: 'Wed', value: 87 }, { day: 'Thu', value: 84 },
-  { day: 'Fri', value: 78 }, { day: 'Sat', value: 71 },
-]
-
-function readStudents() {
-  try {
-    const saved = JSON.parse(localStorage.getItem('campus-attendance-students'))
-    if (Array.isArray(saved) && saved.length) return saved
-  } catch { /* Start with the sample roster if browser storage is unavailable. */ }
-  return sampleStudents
-}
 
 function parseCsvRows(text) {
   const rows = []
@@ -252,8 +220,9 @@ function EmptyState({ icon: Icon = Search, title, detail }) {
 }
 
 function FacultyDashboard({ user, firebaseMode, onLogout }) {
-  const [students, setStudents] = useState(readStudents)
+  const [students, setStudents] = useState([])
   const [backendReady, setBackendReady] = useState(false)
+  const [bootstrapStatus, setBootstrapStatus] = useState('loading')
   const [session, setSession] = useState(null)
   const [studentFormOpen, setStudentFormOpen] = useState(false)
   const [studentDraft, setStudentDraft] = useState({ name: '', roll: '', department: departments[0] })
@@ -266,7 +235,7 @@ function FacultyDashboard({ user, firebaseMode, onLogout }) {
   const [departmentFilter, setDepartmentFilter] = useState('All departments')
   const [seconds, setSeconds] = useState(30)
   const [recentCheckins, setRecentCheckins] = useState([])
-  const [weeklyStats, setWeeklyStats] = useState(weeklyAttendance)
+  const [weeklyStats, setWeeklyStats] = useState([])
   const [toast, setToast] = useState('')
   const [staffFormOpen, setStaffFormOpen] = useState(false)
   const [staffDraft, setStaffDraft] = useState({ name: '', email: '', password: '' })
@@ -287,10 +256,11 @@ function FacultyDashboard({ user, firebaseMode, onLogout }) {
         if (data.weekly) setWeeklyStats(data.weekly)
         setSeconds(data.session?.refreshInSeconds || 30)
         setBackendReady(true)
+        setBootstrapStatus('ready')
       } catch {
         attempts += 1
         if (active && attempts < 10) retryTimer = window.setTimeout(loadBootstrap, 1000)
-        else if (active) setToast('Could not connect to attendance server. Start the app with npm run dev.')
+        else if (active) setBootstrapStatus('error')
       }
     }
     loadBootstrap()
@@ -358,6 +328,9 @@ function FacultyDashboard({ user, firebaseMode, onLogout }) {
       return matchesSearch && matchesStatus && matchesDepartment
     }).sort((a, b) => a.name.localeCompare(b.name))
   }, [students, search, statusFilter, departmentFilter])
+
+  if (bootstrapStatus === 'loading') return <main className="grid min-h-screen place-items-center bg-slate-50 px-4 text-center"><div><span className="mx-auto mb-4 block size-8 animate-spin rounded-full border-2 border-indigo-100 border-t-indigo-600" /><p className="text-sm font-medium text-slate-700">Loading attendance data…</p><p className="mt-1 text-xs text-slate-400">Connecting to your class roster</p></div></main>
+  if (bootstrapStatus === 'error') return <main className="grid min-h-screen place-items-center bg-slate-50 px-4 text-center"><div className="max-w-sm"><p className="text-base font-semibold text-slate-900">Could not load attendance data</p><p className="mt-2 text-sm text-slate-500">Check the server connection and try again.</p><button type="button" onClick={() => window.location.reload()} className="mt-5 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">Try again</button></div></main>
 
   function markStudent(id, value) {
     setStudents((current) => current.map((student) => student.id === id ? { ...student, today: value } : student))
