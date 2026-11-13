@@ -391,10 +391,10 @@ app.post('/api/users', requireAdmin, (request, response) => {
   } catch (error) { if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return sendError(response, 409, 'An account with that email already exists.'); throw error }
 })
 
-const builtIndex = new URL('../public/index.html', import.meta.url)
+const builtIndex = new URL('../dist/index.html', import.meta.url)
 const fs = await import('node:fs')
 if (fs.existsSync(builtIndex)) {
-  app.use(express.static(new URL('../public/', import.meta.url).pathname))
+  app.use(express.static(new URL('../dist/', import.meta.url).pathname))
   app.get(/^\/(?:student-check-in)?\/?$/, (_request, response) => response.sendFile(builtIndex.pathname))
 }
 app.use((error, _request, response, _next) => {

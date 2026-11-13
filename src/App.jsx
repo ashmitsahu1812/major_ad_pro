@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
-import { apiRequest } from './api.js'
+import { apiRequest, waitFor } from './api.js'
 import { firebaseAuth, firebaseConfigured, signInWithGoogle, signOutFromGoogle } from './firebase.js'
 import {
   ArrowDownRight, ArrowRight, ArrowUpRight, Bell, BookOpenCheck,
@@ -623,7 +623,10 @@ export default function App() {
   const [auth, setAuth] = useState({ loading: true, setupRequired: false, user: null })
   useEffect(() => {
     let active = true
-    const identity = firebaseAuth?.authStateReady().then(() => apiRequest('/api/auth/me')) || apiRequest('/api/auth/me')
+    const identity = (async () => {
+      if (firebaseAuth) await waitFor(firebaseAuth.authStateReady(), 5000).catch(() => null)
+      return apiRequest('/api/auth/me').catch(() => ({ user: null }))
+    })()
     Promise.all([apiRequest('/api/auth/status'), identity])
       .then(([status, identity]) => { if (active) setAuth({ loading: false, setupRequired: status.setupRequired, firebaseMode: status.firebaseEnabled, user: identity.user }) })
       .catch(() => { if (active) setAuth({ loading: false, setupRequired: false, user: null, serverError: true }) })
@@ -635,7 +638,7 @@ export default function App() {
 }
 
 function AuthScreen({ setupRequired, firebaseMode, serverError, onAuthenticated }) {
-  const [error, setError] = useState(serverError ? 'Could not connect to the API. Run npm run dev and refresh this page.' : '')
+  const [error, setError] = useState(serverError ? 'Could not connect to the attendance server. Check your connection and reload the page.' : '')
   const [busy, setBusy] = useState(false)
   const [values, setValues] = useState({ token: '', name: '', email: '', password: '' })
   async function continueWithGoogle() {

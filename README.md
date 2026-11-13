@@ -48,7 +48,7 @@ Existing `data/attendance.json` files are imported into SQLite once when the new
 
 ## Deploy on Vercel
 
-The repository is configured for Vercel: it builds the React app into `public/`, serves the API with an Express Function, and rewrites `/student-check-in` to the app entry point. Import the GitHub repository into Vercel and use the default build command (`npm run build`). Set the Node.js version to 22 or newer.
+The repository is configured for Vercel: Vite builds the React app into `dist/` for static delivery, while `api/[...path].js` routes `/api/*` requests to the Express backend. `/student-check-in` rewrites to the app entry point. Import the GitHub repository into Vercel and use the build command `npm run build` with output directory `dist`. Set the Node.js version to 22 or newer.
 
 Add these variables in **Vercel → Project → Settings → Environment Variables** for Production and Preview:
 
