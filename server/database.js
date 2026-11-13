@@ -176,7 +176,8 @@ export function writeSetting(key, value) {
 }
 
 const userCount = database.prepare('SELECT COUNT(*) AS count FROM users').get().count
-if (userCount === 0 && (process.env.ADMIN_SETUP_TOKEN || process.env.NODE_ENV !== 'production' || !database.prepare("SELECT value FROM settings WHERE setting_key = 'admin_setup_hash'").get())) {
+const firebaseMode = process.env.FIREBASE_ENABLED === 'true' && Boolean(process.env.FIREBASE_PROJECT_ID)
+if (!firebaseMode && userCount === 0 && (process.env.ADMIN_SETUP_TOKEN || process.env.NODE_ENV !== 'production' || !database.prepare("SELECT value FROM settings WHERE setting_key = 'admin_setup_hash'").get())) {
   const setupToken = process.env.ADMIN_SETUP_TOKEN || crypto.randomBytes(24).toString('base64url')
   writeSetting('admin_setup_hash', crypto.createHash('sha256').update(setupToken).digest('hex'))
   if (!process.env.ADMIN_SETUP_TOKEN) {
