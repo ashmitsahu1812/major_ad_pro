@@ -1,14 +1,21 @@
 import crypto from 'node:crypto'
 import express from 'express'
-import { database, getGeofence, listStudents, readSetting, writeAudit, writeSetting } from './database.js'
 import { firebaseEnabled, getFirebaseFirestore, verifyFirebaseUser } from './firebase-admin.js'
-import * as cloud from './firestore-store.js'
+
+const postgresEnabled = Boolean(process.env.DATABASE_URL)
+if (postgresEnabled && !firebaseEnabled) throw new Error('PostgreSQL mode requires FIREBASE_ENABLED=true for faculty sign-in.')
+const useFirestore = firebaseEnabled && !postgresEnabled
+const pg = postgresEnabled ? await import('./postgres-store.js') : null
+if (pg) await pg.initializePostgres()
+const databaseModule = postgresEnabled ? {} : await import('./database.js')
+const { database, getGeofence, listStudents, readSetting, writeAudit, writeSetting } = databaseModule
+const cloud = useFirestore ? await import('./firestore-store.js') : null
 
 const port = Number(process.env.PORT || 4173)
 const app = express()
 const sevenDays = 7 * 24 * 60 * 60 * 1000
 const loginAttempts = new Map()
-if (firebaseEnabled && process.env.FIREBASE_MIGRATE_LOCAL_DATA === 'true') {
+if (useFirestore && process.env.FIREBASE_MIGRATE_LOCAL_DATA === 'true') {
   try { await cloud.migrateLocalData() }
   catch (error) { console.error('Optional Firebase data migration failed:', error.message) }
 }
@@ -54,7 +61,7 @@ async function currentUser(request) {
     const match = /^Bearer\s+(.+)$/i.exec(request.headers.authorization || '')
     if (!match) return null
     try {
-      const identity = await verifyFirebaseUser(match[1])
+      const identity = await verifyFirebaseUser(match[1], postgresEnabled ? (email) => pg.getStaff(email) : undefined)
       if (!identity) return null
       return { ...identity, id: identity.uid, authProvider: 'firebase' }
     } catch { return null }
@@ -172,13 +179,16 @@ app.post('/api/auth/logout', (request, response) => {
   response.setHeader('Set-Cookie', `attendance_session=; ${cookieOptions().replace(`Max-Age=${sevenDays / 1000}`, 'Max-Age=0')}`)
   response.json({ ok: true })
 })
-app.get('/api/health', (_request, response) => {
-  try { database.prepare('SELECT 1').get(); response.json({ ok: true }) }
-  catch { response.status(503).json({ ok: false }) }
+app.get('/api/health', async (_request, response) => {
+  try {
+    if (postgresEnabled) await pg.pingPostgres()
+    else database.prepare('SELECT 1').get()
+    response.json({ ok: true, database: postgresEnabled ? 'postgres' : useFirestore ? 'firestore' : 'sqlite' })
+  } catch { response.status(503).json({ ok: false }) }
 })
 
 app.get('/api/session/verify/:token', async (request, response) => {
-  if (firebaseEnabled) {
+  if (useFirestore) {
     const firestore = getFirebaseFirestore()
     const pass = await firestore.collection('qrTokens').doc(request.params.token).get()
     const activeSession = pass.exists && pass.get('expiresAt') > Date.now()
@@ -186,6 +196,11 @@ app.get('/api/session/verify/:token', async (request, response) => {
     if (!activeSession?.exists || !activeSession.get('active')) return sendError(response, 404, 'This attendance pass has expired. Scan the current classroom QR code.')
     const geofence = await cloud.getGeofenceCloud()
     return response.json({ valid: true, radius: geofence.radius, locationSet: Boolean(geofence.center) })
+  }
+  if (postgresEnabled) {
+    const result = await pg.verifySessionToken(request.params.token)
+    if (!result.valid) return sendError(response, 404, 'This attendance pass has expired. Scan the current classroom QR code.')
+    return response.json(result)
   }
   const session = database.prepare(`SELECT session_id FROM session_tokens WHERE token = ? AND expires_at > ?`).get(request.params.token, Date.now())
   const active = session && database.prepare('SELECT id FROM attendance_sessions WHERE id = ? AND active = 1').get(session.session_id)
@@ -200,20 +215,26 @@ app.use('/api', (request, response, next) => {
 })
 
 app.get('/api/bootstrap', async (_request, response) => {
-  if (firebaseEnabled) return response.json({ students: await cloud.listStudentsCloud(), geofence: await cloud.getGeofenceCloud(), session: await cloud.activeSessionCloud(), checkins: await cloud.recentCheckinsCloud(), weekly: await cloud.weeklyAttendanceCloud() })
+  if (useFirestore) return response.json({ students: await cloud.listStudentsCloud(), geofence: await cloud.getGeofenceCloud(), session: await cloud.activeSessionCloud(), checkins: await cloud.recentCheckinsCloud(), weekly: await cloud.weeklyAttendanceCloud() })
+  if (postgresEnabled) return response.json({ students: await pg.listStudents(), geofence: await pg.getGeofence(), session: await pg.currentSession(), checkins: await pg.recentCheckins(), weekly: await pg.weeklyAttendance() })
   const today = localDate()
   const checkins = database.prepare(`SELECT c.id, s.name, s.roll, c.attendance_date AS date, c.created_at AS time
     FROM checkins c JOIN students s ON s.id = c.student_id WHERE c.attendance_date = ? ORDER BY c.created_at DESC LIMIT 8`).all(today)
   response.json({ students: studentList(), geofence: getGeofence(), session: activeSession(), checkins, weekly: weeklyAttendance() })
 })
-app.get('/api/session/current', async (_request, response) => response.json({ session: firebaseEnabled ? await cloud.activeSessionCloud() : activeSession() }))
+app.get('/api/session/current', async (_request, response) => response.json({ session: useFirestore ? await cloud.activeSessionCloud() : postgresEnabled ? await pg.currentSession() : activeSession() }))
 app.post('/api/session/start', async (request, response) => {
-  if (firebaseEnabled) {
+  if (useFirestore) {
     try {
       const session = await cloud.startSessionCloud(request.user.id)
       await cloud.auditCloud(request.user, 'attendance.session.started', 'session', session.sessionId)
       return response.json({ session })
     } catch (error) { return sendError(response, 409, error.message) }
+  }
+  if (postgresEnabled) {
+    if (!(await pg.getGeofence()).center) return sendError(response, 409, 'Set the classroom location before starting attendance.')
+    try { return response.json({ session: await pg.startSession(request.user) }) }
+    catch (error) { return sendError(response, 409, error.message) }
   }
   if (!getGeofence().center) return sendError(response, 409, 'Set the classroom location before starting attendance.')
   const now = Date.now()
@@ -224,11 +245,12 @@ app.post('/api/session/start', async (request, response) => {
   response.json({ session: activeSession(true) })
 })
 app.post('/api/session/end', async (request, response) => {
-  if (firebaseEnabled) {
+  if (useFirestore) {
     await cloud.endSessionCloud()
     await cloud.auditCloud(request.user, 'attendance.session.ended', 'session')
     return response.json({ session: null })
   }
+  if (postgresEnabled) { await pg.endSession(request.user); return response.json({ session: null }) }
   database.prepare('UPDATE attendance_sessions SET active = 0, ended_at = ? WHERE active = 1').run(Date.now())
   writeAudit(request.user.id, 'attendance.session.ended', 'session')
   response.json({ session: null })
@@ -239,9 +261,14 @@ app.put('/api/geofence', async (request, response) => {
   if (!validCenter) return sendError(response, 400, 'Enter a valid class location.')
   if (![25, 50, 75, 100].includes(Number(radius))) return sendError(response, 400, 'Choose a radius from 25 to 100 meters.')
   const geofence = { center, radius: Number(radius) }
-  if (firebaseEnabled) {
+  if (useFirestore) {
     await cloud.saveGeofenceCloud(geofence)
     await cloud.auditCloud(request.user, 'geofence.updated', 'setting', null, { radius: geofence.radius })
+    return response.json({ geofence })
+  }
+  if (postgresEnabled) {
+    await pg.saveGeofence(geofence)
+    await pg.addAudit(request.user, 'geofence.updated', 'setting', null, { radius: geofence.radius })
     return response.json({ geofence })
   }
   writeSetting('geofence', geofence)
@@ -251,12 +278,18 @@ app.put('/api/geofence', async (request, response) => {
 app.post('/api/students', async (request, response) => {
   const input = request.body || {}
   if (!validStudent(input)) return sendError(response, 400, 'Name, roll number, and department are required.')
-  if (firebaseEnabled) {
+  if (useFirestore) {
     try {
       const student = await cloud.createStudentCloud(input)
       await cloud.auditCloud(request.user, 'student.created', 'student', student.id)
       return response.status(201).json({ student, students: await cloud.listStudentsCloud() })
     } catch (error) { return sendError(response, error.message.includes('already') ? 409 : 500, error.message) }
+  }
+  if (postgresEnabled) {
+    try {
+      const student = await pg.createStudent(input, request.user)
+      return response.status(201).json({ student, students: await pg.listStudents() })
+    } catch (error) { if (error.code === '23505') return sendError(response, 409, 'That roll number is already in the roster.'); throw error }
   }
   try {
     const result = database.prepare(`INSERT INTO students (name, roll, department, percentage, today, notified) VALUES (?, ?, ?, 100, 'unmarked', 0)`)
@@ -267,12 +300,16 @@ app.post('/api/students', async (request, response) => {
   } catch (error) { if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return sendError(response, 409, 'That roll number is already in the roster.'); throw error }
 })
 app.patch('/api/students/:id', async (request, response) => {
-  if (firebaseEnabled) {
+  if (useFirestore) {
     try {
       const student = await cloud.patchStudentCloud(request.params.id, request.body || {})
       await cloud.auditCloud(request.user, 'student.updated', 'student', request.params.id, request.body || {})
       return response.json({ student })
     } catch (error) { return sendError(response, error.message === 'Student not found.' ? 404 : 400, error.message) }
+  }
+  if (postgresEnabled) {
+    try { return response.json({ student: await pg.setStudentAttendance(request.params.id, request.body || {}, request.user) }) }
+    catch (error) { return sendError(response, error.message === 'Student not found.' ? 404 : 400, error.message) }
   }
   const id = Number(request.params.id)
   const student = database.prepare('SELECT * FROM students WHERE id = ?').get(id)
@@ -292,12 +329,16 @@ app.post('/api/students/import', async (request, response) => {
   const imported = request.body?.students
   if (!Array.isArray(imported)) return sendError(response, 400, 'No student rows were provided.')
   if (imported.length > 5000) return sendError(response, 413, 'Import up to 5,000 students at a time.')
-  if (firebaseEnabled) {
+  if (useFirestore) {
     try {
       const result = await cloud.importStudentsCloud(imported)
       await cloud.auditCloud(request.user, 'students.imported', 'student', null, result)
       return response.json({ students: await cloud.listStudentsCloud(), ...result })
     } catch (error) { return sendError(response, 500, error.message) }
+  }
+  if (postgresEnabled) {
+    try { return response.json(await pg.importStudents(imported, request.user)) }
+    catch (error) { return sendError(response, error.code === '23505' ? 409 : 500, error.message) }
   }
   const insert = database.prepare(`INSERT INTO students (name, roll, department, percentage, today, notified) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(roll) DO UPDATE SET name = excluded.name, department = excluded.department`)
@@ -313,13 +354,14 @@ app.post('/api/students/import', async (request, response) => {
 app.post('/api/attendance/mark-all', async (request, response) => {
   const { today } = request.body || {}
   if (!['present', 'unmarked'].includes(today)) return sendError(response, 400, 'Invalid attendance status.')
-  if (firebaseEnabled) {
+  if (useFirestore) {
     try {
       await cloud.markAllCloud(today)
       await cloud.auditCloud(request.user, 'attendance.marked_all', 'attendance', null, { status: today })
       return response.json({ students: await cloud.listStudentsCloud() })
     } catch (error) { return sendError(response, 500, error.message) }
   }
+  if (postgresEnabled) return response.json({ students: await pg.markAll(today, request.user) })
   const tx = database.transaction(() => {
     if (today === 'unmarked') database.prepare('DELETE FROM attendance_records WHERE attendance_date = ? AND source = ?').run(localDate(), 'manual')
     else for (const student of database.prepare('SELECT id FROM students').all()) recordAttendance(student.id, 'present', request.user.id)
@@ -330,9 +372,17 @@ app.post('/api/attendance/mark-all', async (request, response) => {
 })
 app.post('/api/checkins', async (request, response) => {
   const { token, roll: submittedRoll, latitude, longitude } = request.body || {}
-  if (firebaseEnabled) {
+  if (useFirestore) {
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return sendError(response, 400, 'A valid device location is required.')
     try { return response.status(201).json(await cloud.checkInCloud({ token, roll: submittedRoll, latitude, longitude })) }
+    catch (error) {
+      const status = error.message.includes('expired') ? 410 : error.message.includes('outside') || error.message.includes('from class') ? 403 : error.message.includes('not found') ? 404 : error.message.includes('already') ? 409 : 400
+      return sendError(response, status, error.message)
+    }
+  }
+  if (postgresEnabled) {
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return sendError(response, 400, 'A valid device location is required.')
+    try { return response.status(201).json(await pg.checkIn({ token, roll: submittedRoll, latitude, longitude })) }
     catch (error) {
       const status = error.message.includes('expired') ? 410 : error.message.includes('outside') || error.message.includes('from class') ? 403 : error.message.includes('not found') ? 404 : error.message.includes('already') ? 409 : 400
       return sendError(response, status, error.message)
@@ -359,32 +409,42 @@ app.post('/api/checkins', async (request, response) => {
   response.status(201).json({ checkin: { name: student.name, roll: student.roll, date }, student: { ...student, today: 'present' }, distance: Math.round(distance) })
 })
 app.get('/api/reports/attendance', async (_request, response) => {
-  if (firebaseEnabled) return response.json(await cloud.attendanceReportCloud())
+  if (useFirestore) return response.json(await cloud.attendanceReportCloud())
+  if (postgresEnabled) return response.json(await pg.attendanceReport())
   response.json(database.prepare(`SELECT attendance_date AS date, status, source, COUNT(*) AS count FROM attendance_records
     GROUP BY attendance_date, status, source ORDER BY attendance_date DESC LIMIT 180`).all())
 })
 app.get('/api/audit', async (_request, response) => {
-  if (firebaseEnabled) return response.json({ entries: await cloud.auditEntriesCloud() })
+  if (useFirestore) return response.json({ entries: await cloud.auditEntriesCloud() })
+  if (postgresEnabled) return response.json({ entries: await pg.auditEntries() })
   response.json({ entries: database.prepare(`SELECT a.id, u.name AS actor, a.action, a.entity_type AS entityType,
   a.entity_id AS entityId, a.details, a.created_at AS createdAt FROM audit_log a LEFT JOIN users u ON u.id = a.actor_user_id ORDER BY a.id DESC LIMIT 200`).all() })
 })
 app.get('/api/users', requireAdmin, async (_request, response) => {
-  if (firebaseEnabled) {
+  if (useFirestore) {
     const snapshot = await getFirebaseFirestore().collection('staff').get()
     return response.json({ users: snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) })
   }
+  if (postgresEnabled) return response.json({ users: await pg.listStaff() })
   return response.json({ users: database.prepare('SELECT id, name, email, role, active, created_at AS createdAt FROM users ORDER BY name').all() })
 })
-app.post('/api/users', requireAdmin, (request, response) => {
+app.post('/api/users', requireAdmin, async (request, response) => {
   const { name, email, password } = request.body || {}
   if (typeof name !== 'string' || !name.trim() || typeof email !== 'string' || !/^\S+@\S+\.\S+$/.test(email) || (!firebaseEnabled && (typeof password !== 'string' || password.length < 12))) return sendError(response, 400, firebaseEnabled ? 'Enter a name and valid email.' : 'Enter a name, valid email, and password with at least 12 characters.')
-  if (firebaseEnabled) {
+  if (useFirestore) {
     const emailKey = email.trim().toLowerCase()
     return getFirebaseFirestore().collection('staff').doc(emailKey).set({ name: name.trim(), email: emailKey, role: 'faculty', active: true, createdAt: new Date().toISOString() }, { merge: true })
       .then(async () => {
         await cloud.auditCloud(request.user, 'faculty.created', 'user', emailKey)
         response.status(201).json({ user: { name: name.trim(), email: emailKey, role: 'faculty', active: true } })
       }).catch((error) => { console.error(error); sendError(response, 500, 'Could not create the Firebase staff profile.') })
+  }
+  if (postgresEnabled) {
+    try {
+      const user = await pg.addStaff({ name, email })
+      await pg.addAudit(request.user, 'faculty.created', 'user', user.email)
+      return response.status(201).json({ user })
+    } catch (error) { return sendError(response, 500, 'Could not create the faculty profile.') }
   }
   const credential = hashPassword(password)
   try {

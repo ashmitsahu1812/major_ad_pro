@@ -15,7 +15,7 @@ if (firebaseEnabled) {
   firestore = getFirestore(app)
 }
 
-export async function verifyFirebaseUser(idToken) {
+export async function verifyFirebaseUser(idToken, staffLookup) {
   if (!firebaseEnabled || !adminAuth) return null
   const decoded = await adminAuth.verifyIdToken(idToken, true)
   const email = String(decoded.email || '').trim().toLowerCase()
@@ -24,9 +24,9 @@ export async function verifyFirebaseUser(idToken) {
   const admins = (process.env.FIREBASE_ADMIN_EMAILS || '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean)
   if (admins.includes(email)) return { uid: decoded.uid, email, name: decoded.name || email, role: 'admin' }
 
-  const approved = await firestore.collection('staff').doc(email).get()
-  if (approved.exists && approved.get('active') === true && ['faculty', 'admin'].includes(approved.get('role'))) {
-    return { uid: decoded.uid, email, name: decoded.name || approved.get('name') || email, role: approved.get('role') }
+  const approved = staffLookup ? await staffLookup(email) : await firestore.collection('staff').doc(email).get().then((snapshot) => snapshot.exists ? snapshot.data() : null)
+  if (approved?.active === true && ['faculty', 'admin'].includes(approved.role)) {
+    return { uid: decoded.uid, email, name: decoded.name || approved.name || email, role: approved.role }
   }
   return null
 }

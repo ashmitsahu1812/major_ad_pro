@@ -1,6 +1,6 @@
 # Smart College Attendance
 
-React, Tailwind, and Express attendance app with Google faculty sign-in, student check-in, CSV roster tools, geofencing, attendance history, and an audit log. With Firebase enabled, Firestore stores the roster and attendance records. Without Firebase configuration, the app uses SQLite in `data/attendance.sqlite` for local development.
+React, Tailwind, and Express attendance app with Google faculty sign-in, student check-in, CSV roster tools, geofencing, attendance history, and an audit log. Local development uses SQLite in `data/attendance.sqlite`. Production can use managed PostgreSQL by setting `DATABASE_URL`; Firebase Authentication remains the faculty sign-in provider.
 
 ## Run locally
 
@@ -17,16 +17,12 @@ Open the faculty app at `http://localhost:5173`. Local mode prints a one-time ad
 
 Firebase is not connected until you create a project and provide its app settings:
 
-1. Open the [Firebase Console](https://console.firebase.google.com/) and choose **Add project**. Give it a name such as `Smart College Attendance`.
-2. From the project overview, choose the **Web** (`</>`) app icon, register the app, and copy the web config values. See [Firebase's web setup guide](https://firebase.google.com/docs/web/setup).
-3. Open **Authentication → Get started → Sign-in method**, enable **Google**, choose a support email, and save. See [Google sign-in setup](https://firebase.google.com/docs/auth/web/google-signin).
-4. Open **Firestore Database → Create database**. Choose **Production mode** and a region near the college. Production mode blocks direct browser reads/writes while the server uses Firebase Admin. See the [Firestore quickstart](https://firebase.google.com/docs/firestore/quickstart).
-5. Add `localhost` and the eventual hosted app domain under **Authentication → Settings → Authorized domains**.
-6. `.env` is already filled with the Web config you sent. Add your Google account email to `FIREBASE_ADMIN_EMAILS`, set `FIREBASE_ENABLED=true`, and keep `.env` private; Git ignores it.
-7. For local server credentials, create a service-account key in **Project settings → Service accounts** and save the JSON file outside this repository. Set `GOOGLE_APPLICATION_CREDENTIALS` in `.env` to its full path. Do not upload or send that file. Firebase recommends Application Default Credentials for trusted server environments; on Google Cloud, attach a service identity instead of using a downloaded key. See [Admin SDK setup](https://firebase.google.com/docs/admin/setup).
-8. Deploy the included server-only Firestore rules with `firebase deploy --only firestore:rules --project smart-college-attendance-1462f` after installing and signing in to the Firebase CLI.
+1. Register a Firebase Web app and enable **Authentication → Google**. See [Firebase web setup](https://firebase.google.com/docs/web/setup) and [Google sign-in setup](https://firebase.google.com/docs/auth/web/google-signin).
+2. Add `localhost` and the hosted app domain to **Authentication → Settings → Authorized domains**.
+3. Set the `VITE_FIREBASE_*` values, `FIREBASE_PROJECT_ID`, `FIREBASE_ADMIN_EMAILS`, and `FIREBASE_ENABLED=true`. Keep `.env` private.
+4. Keep the Firebase Admin service-account JSON in a server-only environment variable. It verifies Google ID tokens; do not commit or expose it in a `VITE_` variable. See [Admin SDK setup](https://firebase.google.com/docs/admin/setup).
 
-Restart `npm run dev` after updating `.env`. The server verifies Google ID tokens and allows only the admin email or staff entries approved by an admin. On first Firebase startup, it copies the current SQLite roster and attendance records to Firestore once. New records are stored in Firestore. Existing SQLite data stays in `data/` as a local backup.
+Restart `npm run dev` after updating `.env`. The server verifies Google ID tokens and allows only the admin email or staff entries approved by an admin. If `DATABASE_URL` is unset, local SQLite is used. In PostgreSQL mode, students, attendance, geofence, sessions, check-ins, staff, and audit records are stored in PostgreSQL.
 
 Build and run the production server locally with:
 
@@ -46,9 +42,9 @@ Then open `http://localhost:4173`.
 
 Existing `data/attendance.json` files are imported into SQLite once when the new database is empty. Keep `data/` on persistent storage and back it up. SQLite is intended for a single app instance; do not run multiple app replicas against a local SQLite file.
 
-## Deploy on Vercel
+## Deploy with Vercel and Render PostgreSQL
 
-The repository is configured for Vercel: Vite builds the React app into `public/`, and the Express application handles the API. The compiled frontend files are kept in Git so Vercel can publish them as CDN assets alongside the Express function. `/student-check-in` rewrites to the app entry point. Import the GitHub repository into Vercel and use the build command `npm run build`. Set the Node.js version to 24.
+Create a PostgreSQL database in Render, then copy its **External Database URL**. In Vercel, set `DATABASE_URL` to that URL as a server-only secret for Production and Preview. Use the external URL because Vercel is outside Render's private network. Set `PG_POOL_MAX=5` and `PG_SSL=true`, and keep `FIREBASE_ENABLED=true` so Firebase continues to handle Google faculty sign-in. The repository builds the React app into `public/`; Express handles the API, and `/student-check-in` rewrites to the app entry point. Use build command `npm run build` and Node.js 24.
 
 Add these variables in **Vercel → Project → Settings → Environment Variables** for Production and Preview:
 
@@ -61,10 +57,12 @@ Add these variables in **Vercel → Project → Settings → Environment Variabl
 - `FIREBASE_PROJECT_ID`
 - `FIREBASE_ADMIN_EMAILS`
 - `FIREBASE_SERVICE_ACCOUNT_JSON` — paste the service-account JSON as a server-only secret; never add it to Git or a `VITE_` variable.
-- `FIREBASE_MIGRATE_LOCAL_DATA=true` — only enable temporarily if you still need to import a local SQLite roster into Firestore; leave unset after the import.
+- `DATABASE_URL` — Render's external PostgreSQL URL. Keep it private and server-only.
+- `PG_POOL_MAX=5`
+- `PG_SSL=true`
 - `APP_TIME_ZONE=Asia/Kolkata`
 
-After the first deployment, add the assigned `*.vercel.app` hostname to **Firebase Authentication → Settings → Authorized domains** and redeploy. The server credential is stored in Vercel's environment settings, roster and attendance data stay in Firestore, and Vercel's filesystem is temporary.
+After deployment, add the assigned `*.vercel.app` hostname to **Firebase Authentication → Settings → Authorized domains**. Migrate existing Firestore data once by setting `DATABASE_URL`, Firebase credentials, and `FIREBASE_ENABLED=true` in a private local `.env`, then running `npm run migrate:firestore-to-postgres`. The migration refuses to merge into a non-empty PostgreSQL roster and records a completion marker. Firestore read quota must be available for the migration to finish. Once verified, the app uses PostgreSQL for all attendance data; Firebase remains only for authentication.
 
 ## Deploy elsewhere
 
