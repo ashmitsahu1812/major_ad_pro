@@ -2,6 +2,10 @@
 
 React, Tailwind, and Express attendance app with Google faculty sign-in, student check-in, CSV roster tools, geofencing, attendance history, and an audit log. Local development uses SQLite in `data/attendance.sqlite`. Production can use managed PostgreSQL by setting `DATABASE_URL`; Firebase Authentication remains the faculty sign-in provider.
 
+See [DATABASE_DESIGN.md](DATABASE_DESIGN.md) for the database choice, sample data, ER diagram, query patterns, normalization, constraints, transaction behavior, indexes, and scaling notes across SQLite, PostgreSQL, and the optional Firestore mode.
+
+For a spoken walkthrough, see the [database viva video script](VIVA_DATABASE_SCRIPT.md).
+
 ## Run locally
 
 Requirements: Node.js 24.12+.
