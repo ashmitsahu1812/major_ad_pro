@@ -5,7 +5,9 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   publicDir: false,
-  build: { outDir: 'public', emptyOutDir: true },
+  // Keep existing public assets in place while Vercel packages the Express
+  // function and CDN files from the same directory.
+  build: { outDir: 'public', emptyOutDir: false },
   server: {
     proxy: {
       '/api': 'http://127.0.0.1:4173',
