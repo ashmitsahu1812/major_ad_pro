@@ -6,6 +6,67 @@ See [DATABASE_DESIGN.md](DATABASE_DESIGN.md) for the database choice, sample dat
 
 For a spoken walkthrough, see the [database viva video script](VIVA_DATABASE_SCRIPT.md).
 
+## Database ER diagram
+
+The diagram below shows the production PostgreSQL model. `attendance_records` resolves the many-to-many relationship between students and attendance dates. Settings and audit entries are standalone in this model; `audit_log.actor` is stored as text rather than a foreign key.
+
+```mermaid
+erDiagram
+  STUDENTS ||--o{ ATTENDANCE_RECORDS : has
+  STUDENTS ||--o{ CHECKINS : submits
+  ATTENDANCE_SESSIONS ||--o{ SESSION_TOKENS : issues
+
+  STUDENTS {
+    text id PK
+    text roll UK
+    text name
+    text department
+  }
+  ATTENDANCE_RECORDS {
+    text student_id PK, FK
+    text attendance_date PK
+    text status
+    text source
+    text recorded_at
+  }
+  CHECKINS {
+    text id PK
+    text student_id FK
+    text attendance_date
+    text created_at
+    integer distance_m
+  }
+  ATTENDANCE_SESSIONS {
+    text id PK
+    boolean active
+    bigint started_at
+    bigint ended_at
+  }
+  SESSION_TOKENS {
+    text token PK
+    text session_id FK
+    bigint expires_at
+  }
+  STAFF {
+    text email PK
+    text name
+    text role
+  }
+  SETTINGS {
+    text setting_key PK
+    jsonb value
+  }
+  AUDIT_LOG {
+    bigint id PK
+    text actor
+    text action
+    jsonb details
+    text created_at
+  }
+```
+
+SQLite’s local schema adds `users` and `auth_sessions` for password sign-in, links attendance records and audit entries to users, and links check-ins to attendance sessions. See [`DATABASE_DESIGN.md`](DATABASE_DESIGN.md) for the full schema details and source files.
+
 ## Run locally
 
 Requirements: Node.js 24.12+.
