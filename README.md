@@ -4,6 +4,11 @@ React, Tailwind, and Express attendance app with Google faculty sign-in, student
 
 See [DATABASE_DESIGN.md](DATABASE_DESIGN.md) for the database choice, sample data, ER diagram, query patterns, normalization, constraints, transaction behavior, indexes, and scaling notes across SQLite, PostgreSQL, and the optional Firestore mode.
 
+## Data Engineering submission
+
+See [`DE/README.md`](DE/README.md) for the database model, normalization, runnable PostgreSQL schema, synthetic sample data, ten project queries with captured outputs, and backend integration notes.
+
+
 For a spoken walkthrough, see the [database viva video script](VIVA_DATABASE_SCRIPT.md).
 
 ## Database ER diagram
