@@ -83,18 +83,11 @@ npm run dev
 
 Open the faculty app at `http://localhost:5173`. Local mode prints a one-time administrator setup token on its first run. In Firebase mode, only the Google account listed in `FIREBASE_ADMIN_EMAILS` can be the first administrator.
 
-## Desktop app
+## Install as a desktop app
 
-The Electron desktop app runs the same Express and React application locally with SQLite. Its database is stored in the operating system's application data folder, and the first launch displays the one-time administrator setup token. The desktop build always uses local accounts and SQLite; it does not use the `.env` cloud database or Firebase settings.
+The hosted web app is also installable as a desktop Progressive Web App (PWA). Open the deployed site in Chrome or Edge, then choose **Install Smart College Attendance** from the browser's install icon or menu. It opens in its own app window and uses the same hosted backend and database as the website, including student QR check-in. No separate desktop server or Electron download is needed.
 
-```sh
-npm install
-npm run desktop:dev
-```
-
-Create an installable package for the current platform with `npm run desktop:dist`. Platform-specific builds are available as `npm run desktop:dist:mac`, `npm run desktop:dist:win`, and `npm run desktop:dist:linux`. Build packages on the target operating system. macOS distribution outside local use may require signing and notarization.
-
-In desktop mode, faculty can manage the roster and record attendance manually. Phone QR check-in is intended for the hosted HTTPS deployment: a desktop app's local address is private to that computer, and phone browsers require HTTPS for location access.
+The site must be served over HTTPS for installation and location access. For local development, `http://localhost` is treated as a secure context by supported browsers, but the install option may vary by browser.
 
 ## Create the Firebase project
 

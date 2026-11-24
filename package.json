@@ -9,12 +9,6 @@
   "scripts": {
     "dev": "concurrently -k -n api,web \"node --env-file-if-exists=.env server/index.js\" \"vite\"",
     "build": "vite build",
-    "desktop:dev": "npm run build && electron .",
-    "desktop:pack": "npm run build && electron-builder --dir",
-    "desktop:dist": "npm run build && electron-builder",
-    "desktop:dist:mac": "npm run build && electron-builder --mac",
-    "desktop:dist:win": "npm run build && electron-builder --win",
-    "desktop:dist:linux": "npm run build && electron-builder --linux",
     "migrate:firestore-to-postgres": "node --env-file-if-exists=.env scripts/migrate-firestore-to-postgres.js",
     "preview": "node --env-file-if-exists=.env server/index.js",
     "start": "node --env-file-if-exists=.env server/index.js"
@@ -34,43 +28,7 @@
     "@tailwindcss/vite": "^4.1.0",
     "@vitejs/plugin-react": "^5.0.0",
     "concurrently": "^10.0.7",
-    "electron": "^45.4.1",
-    "electron-builder": "^26.18.0",
     "tailwindcss": "^4.1.0",
     "vite": "^7.0.0"
-  },
-  "main": "desktop/main.js",
-  "build": {
-    "appId": "edu.smartcollege.attendance",
-    "productName": "Smart College Attendance",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "desktop/**/*",
-      "server/**/*",
-      "public/**/*",
-      "package.json"
-    ],
-    "asarUnpack": [
-      "**/*.node"
-    ],
-    "mac": {
-      "target": [
-        "dmg",
-        "zip"
-      ]
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ]
-    },
-    "linux": {
-      "target": [
-        "AppImage",
-        "deb"
-      ]
-    }
   }
 }
