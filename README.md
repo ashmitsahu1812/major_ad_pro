@@ -83,6 +83,19 @@ npm run dev
 
 Open the faculty app at `http://localhost:5173`. Local mode prints a one-time administrator setup token on its first run. In Firebase mode, only the Google account listed in `FIREBASE_ADMIN_EMAILS` can be the first administrator.
 
+## Desktop app
+
+The Electron desktop app runs the same Express and React application locally with SQLite. Its database is stored in the operating system's application data folder, and the first launch displays the one-time administrator setup token. The desktop build always uses local accounts and SQLite; it does not use the `.env` cloud database or Firebase settings.
+
+```sh
+npm install
+npm run desktop:dev
+```
+
+Create an installable package for the current platform with `npm run desktop:dist`. Platform-specific builds are available as `npm run desktop:dist:mac`, `npm run desktop:dist:win`, and `npm run desktop:dist:linux`. Build packages on the target operating system. macOS distribution outside local use may require signing and notarization.
+
+In desktop mode, faculty can manage the roster and record attendance manually. Phone QR check-in is intended for the hosted HTTPS deployment: a desktop app's local address is private to that computer, and phone browsers require HTTPS for location access.
+
 ## Create the Firebase project
 
 Firebase is not connected until you create a project and provide its app settings:
